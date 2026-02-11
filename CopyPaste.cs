@@ -200,6 +200,10 @@ namespace Oxide.Plugins
                 [DefaultValue(false)]
                 public bool Tree { get; set; } = false;
 
+                [JsonProperty(PropertyName = "Align (true/false)")]
+                [DefaultValue(false)]
+                public bool Align { get; set; } = false;
+
                 [JsonProperty(PropertyName = "Default radius to look for entities from block")]
                 [DefaultValue(3.0f)]
                 public float Radius { get; set; } = 3.0f;
@@ -483,7 +487,7 @@ namespace Oxide.Plugins
             if (!entity.IsValid())
                 return Lang("NO_ENTITY_RAY", player.UserIDString);
 
-            return TryCopy(hit.point, entity.GetNetworkRotation().eulerAngles, filename,
+            return TryCopy(hit.point, entity.GetNetworkRotation().eulerAngles, entity, filename,
                 DegreeToRadian(player.GetNetworkRotation().eulerAngles.y), args, player.IPlayer, callback);
         }
 
@@ -640,8 +644,8 @@ namespace Oxide.Plugins
             }
         }
 
-        private void Copy(Vector3 sourcePos, Vector3 sourceRot, string filename, float rotationCorrection,
-            CopyMechanics copyMechanics, float range, bool saveTree, bool saveShare, bool eachToEach, IPlayer player,
+        private void Copy(Vector3 sourcePos, Vector3 sourceRot, BaseEntity sourceEntity, string filename, float rotationCorrection,
+            CopyMechanics copyMechanics, float range, bool saveTree, bool saveShare, bool eachToEach, bool align, IPlayer player,
             Action callback)
         {
             var currentLayer = _copyLayer;
@@ -659,8 +663,10 @@ namespace Oxide.Plugins
                 SaveTree = saveTree,
                 CopyMechanics = copyMechanics,
                 EachToEach = eachToEach,
+                Align = align,
                 SourcePos = sourcePos,
                 SourceRot = sourceRot,
+                SourceEntity = sourceEntity,
                 Player = player,
                 BasePlayer = player.Object as BasePlayer,
                 Callback = callback
@@ -806,10 +812,18 @@ namespace Oxide.Plugins
         private Dictionary<string, object> EntityData(BaseEntity entity, Vector3 entPos, Vector3 entRot,
             CopyData copyData)
         {
-            var normalizedPos = NormalizePosition(copyData.SourcePos, entPos, copyData.RotCor);
+            var normalizedEntPos = NormalizePosition(copyData.SourcePos, entPos, copyData.RotCor);
             var isChild = entity.HasParent();
 
             entRot.y -= copyData.RotCor;
+
+            if (copyData.Align)
+            {
+                var srcRotY = copyData.SourceEntity.transform.rotation.eulerAngles.y / Mathf.Rad2Deg - copyData.RotCor;
+                var normalizedSrcPos = NormalizePosition(copyData.SourcePos, copyData.SourceEntity.transform.position, copyData.RotCor);
+                entRot.y -= srcRotY;
+                normalizedEntPos = NormalizePosition(normalizedSrcPos, normalizedEntPos, srcRotY);
+            }
 
             var data = new Dictionary<string, object>
             {
@@ -819,9 +833,9 @@ namespace Oxide.Plugins
                 {
                     "pos", new Dictionary<string, object>
                     {
-                        { "x", isChild ? entity.transform.localPosition.x.ToString() : normalizedPos.x.ToString() },
-                        { "y", isChild ? entity.transform.localPosition.y.ToString() : normalizedPos.y.ToString() },
-                        { "z", isChild ? entity.transform.localPosition.z.ToString() : normalizedPos.z.ToString() }
+                        { "x", isChild ? entity.transform.localPosition.x.ToString() : normalizedEntPos.x.ToString() },
+                        { "y", isChild ? entity.transform.localPosition.y.ToString() : normalizedEntPos.y.ToString() },
+                        { "z", isChild ? entity.transform.localPosition.z.ToString() : normalizedEntPos.z.ToString() }
                     }
                 },
                 {
@@ -1562,6 +1576,19 @@ namespace Oxide.Plugins
             return transformedPos;
         }
 
+        private Vector3 NormalizePosition(Vector3 pos, float diffRot)
+        {
+            var newX = pos.x * (float)Math.Cos(-diffRot) +
+                       pos.z * (float)Math.Sin(-diffRot);
+            var newZ = pos.z * (float)Math.Cos(-diffRot) -
+                       pos.x * (float)Math.Sin(-diffRot);
+
+            pos.x = newX;
+            pos.z = newZ;
+
+            return pos;
+        }
+
         private PasteData Paste(ICollection<Dictionary<string, object>> entities, Dictionary<string, object> protocol,
             bool ownership, Vector3 startPos, IPlayer player, bool stability, float rotationCorrection,
             float heightAdj, bool auth, Action callback, Action<BaseEntity> callbackSpawned, string filename,
@@ -1580,7 +1607,7 @@ namespace Oxide.Plugins
             VersionNumber vNumber = default;
             if (version != null)
                 vNumber = new VersionNumber((int)version["Major"], (int)version["Minor"], (int)version["Patch"]);
-            
+
             var pasteData = new PasteData
             {
                 HeightAdj = heightAdj,
@@ -3921,10 +3948,10 @@ namespace Oxide.Plugins
             }
         }
 
-        private object TryCopy(Vector3 sourcePos, Vector3 sourceRot, string filename, float rotationCorrection,
+        private object TryCopy(Vector3 sourcePos, Vector3 sourceRot, BaseEntity sourceEntity, string filename, float rotationCorrection,
             string[] args, IPlayer player, Action callback)
         {
-            bool saveShare = _config.Copy.Share, saveTree = _config.Copy.Tree, eachToEach = _config.Copy.EachToEach;
+            bool saveShare = _config.Copy.Share, saveTree = _config.Copy.Tree, eachToEach = _config.Copy.EachToEach, align = _config.Copy.Align;
             var copyMechanics = CopyMechanics.Proximity;
             var radius = _config.Copy.Radius;
 
@@ -3987,13 +4014,20 @@ namespace Oxide.Plugins
 
                         break;
 
+                    case "a":
+                    case "align":
+                        if (!bool.TryParse(args[valueIndex], out align))
+                            return Lang("SYNTAX_BOOL", null, param);
+
+                        break;
+
                     default:
                         return Lang("SYNTAX_COPY");
                 }
             }
 
-            Copy(sourcePos, sourceRot, filename, rotationCorrection, copyMechanics, radius, saveTree, saveShare,
-                eachToEach, player, callback);
+            Copy(sourcePos, sourceRot, sourceEntity, filename, rotationCorrection, copyMechanics, radius, saveTree, saveShare,
+                eachToEach, align, player, callback);
 
             return true;
         }
@@ -4198,8 +4232,13 @@ namespace Oxide.Plugins
                         break;
 
                     case "rotation":
-                        if (!float.TryParse(args[valueIndex], out rotationCorrection))
+                        float parsedRotation;
+                        bool parseSuccessful = float.TryParse(args[valueIndex], out parsedRotation);
+
+                        if (!parseSuccessful)
                             return new ValueTuple<object, PasteData>(Lang("SYNTAX_FLOAT", userId, param), null);
+
+                        rotationCorrection = parsedRotation / Mathf.Rad2Deg;
 
                         break;
 
@@ -5308,6 +5347,7 @@ namespace Oxide.Plugins
             public List<object> RawData = new List<object>();
             public Vector3 SourcePos;
             public Vector3 SourceRot;
+            public BaseEntity SourceEntity;
             public Action Callback;
 
             public string Filename;
@@ -5318,6 +5358,7 @@ namespace Oxide.Plugins
             public bool SaveShare;
             public CopyMechanics CopyMechanics;
             public bool EachToEach;
+            public bool Align;
             public uint BuildingId = 0;
 
 #if DEBUG
