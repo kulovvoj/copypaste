@@ -74,6 +74,8 @@ namespace Oxide.Plugins
 
         private Dictionary<string, Stack<List<BaseEntity>>> _lastPastes =
             new Dictionary<string, Stack<List<BaseEntity>>>();
+        private Dictionary<string, RepeatGrid> _repeatGrids =
+            new Dictionary<string, RepeatGrid>();
 
         private Dictionary<string, SignSize> _signSizes = new Dictionary<string, SignSize>
         {
@@ -138,6 +140,61 @@ namespace Oxide.Plugins
             {
                 Width = width;
                 Height = height;
+            }
+        }
+
+        public class RepeatGrid
+        {
+            public Grid Grid;
+            public Dictionary<int, RFOffset> ReceiverOffsets;
+            public Dictionary<int, RFOffset> BroadcasterOffsets;
+
+            public RepeatGrid()
+            {
+                ReceiverOffsets = new Dictionary<int, RFOffset>();
+                BroadcasterOffsets = new Dictionary<int, RFOffset>();
+            }
+            public RepeatGrid(Grid grid, Dictionary<int, RFOffset> receiverOffsets, Dictionary<int, RFOffset> broadcasterOffsets)
+            {
+                Grid = grid;
+                ReceiverOffsets = receiverOffsets;
+                BroadcasterOffsets = broadcasterOffsets;
+            }
+        }
+
+        public class Grid
+        {
+            public int X;
+            public int Y;
+            public int Z;
+            public float XOffset;
+            public float YOffset;
+            public float ZOffset;
+
+            public Grid(int x, int y, int z, float xOffset, float yOffset, float zOffset)
+            {
+                X = x;
+                Y = y;
+                Z = z;
+                XOffset = xOffset;
+                YOffset = yOffset;
+                ZOffset = zOffset;
+            }
+        }
+
+        public class RFOffset
+        {
+            public int Frequency;
+            public int XOffset;
+            public int YOffset;
+            public int ZOffset;
+
+            public RFOffset(int frequency, int xOffset, int yOffset, int zOffset)
+            {
+                Frequency = frequency;
+                XOffset = xOffset;
+                YOffset = yOffset;
+                ZOffset = zOffset;
             }
         }
 
@@ -503,28 +560,35 @@ namespace Oxide.Plugins
             if (!Physics.Raycast(player.eyes.HeadRay(), out hit, 1000f, _rayPaste))
                 return Lang("NO_ENTITY_RAY", player.UserIDString);
 
-            return TryPaste(hit.point, filename, player.IPlayer,
-                DegreeToRadian(player.GetNetworkRotation().eulerAngles.y),
-                args, callback: callback, callbackSpawned: callbackSpawned).Item1;
-        }
+            object returnVal = Lang("SYNTAX_REPEAT", player.UserIDString);
 
-        private object TryPasteFromVector3(Vector3 pos, float rotationCorrection, string filename, string[] args,
-            Action callback = null, Action<BaseEntity> callbackSpawned = null)
-        {
-            return TryPaste(pos, filename, _consolePlayer, rotationCorrection, args, callback: callback,
-                callbackSpawned: callbackSpawned).Item1;
-        }
+            if (_repeatGrids.TryGetValue(player.IPlayer.Id, out RepeatGrid repeatGrid) && repeatGrid.Grid != null &&
+                repeatGrid.Grid.X > 0 &&
+                repeatGrid.Grid.Y > 0 &&
+                repeatGrid.Grid.Z > 0)
+            {
+                for (int x = 0; x < repeatGrid.Grid.X; x++)
+                {
+                    for (int y = 0; y < repeatGrid.Grid.Y; y++)
+                    {
+                        for (int z = 0; z < repeatGrid.Grid.Z; z++)
+                        {
+                            returnVal = TryPaste(hit.point, filename, player.IPlayer,
+                                DegreeToRadian(player.GetNetworkRotation().eulerAngles.y),
+                                args, callback: callback, callbackSpawned: callbackSpawned,
+                                repeatGrid: repeatGrid, xCopy: x, yCopy: y, zCopy: z).Item1;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                returnVal = TryPaste(hit.point, filename, player.IPlayer,
+                    DegreeToRadian(player.GetNetworkRotation().eulerAngles.y),
+                    args, callback: callback, callbackSpawned: callbackSpawned).Item1;
+            }
 
-        private ValueTuple<object, Action> TryPasteFromVector3Cancellable(Vector3 pos, float rotationCorrection,
-            string filename, string[] args,
-            Action callback = null, Action<BaseEntity> callbackSpawned = null)
-        {
-            var result = TryPaste(pos, filename, _consolePlayer, rotationCorrection, args, callback: callback,
-                callbackSpawned: callbackSpawned);
-
-            var pasteData = result.Item2;
-
-            return new ValueTuple<object, Action>(result.Item1, () => pasteData.Cancelled = true);
+            return returnVal;
         }
 
         #endregion
@@ -3880,8 +3944,39 @@ namespace Oxide.Plugins
             }
         }
 
+        private List<object> DeepCopyList(List<object> list)
+        {
+            var newList = new List<object>();
+            foreach (var item in list)
+            {
+                if (item is List<object> sublist)
+                    newList.Add(DeepCopyList(sublist));
+                else if (item is Dictionary<string, object> subDict)
+                    newList.Add(DeepCopyDict(subDict));
+                else
+                    newList.Add(item); // for now, just copy primitives/strings
+            }
+            return newList;
+        }
+
+        private Dictionary<string, object> DeepCopyDict(Dictionary<string, object> dict)
+        {
+            var copy = new Dictionary<string, object>();
+            foreach (var kvp in dict)
+            {
+                if (kvp.Value is Dictionary<string, object> subDict)
+                    copy[kvp.Key] = DeepCopyDict(subDict);
+                else if (kvp.Value is List<object> subList)
+                    copy[kvp.Key] = DeepCopyList(subList);
+                else
+                    copy[kvp.Key] = kvp.Value; // primitive/string
+            }
+            return copy;
+        }
+
         private HashSet<Dictionary<string, object>> PreLoadData(List<object> entities, Vector3 startPos,
-            float rotationCorrection, bool deployables, bool inventories, bool auth, bool vending)
+            float rotationCorrection, bool deployables, bool inventories, bool auth, bool vending,
+            RepeatGrid repeatGrid = null, int? xCopy = null, int? yCopy = null, int? zCopy = null)
         {
             var eulerRotation = new Vector3(0f, rotationCorrection, 0f);
             var quaternionRotation = Quaternion.Euler(eulerRotation * Mathf.Rad2Deg);
@@ -3895,9 +3990,22 @@ namespace Oxide.Plugins
                 var pos = (Dictionary<string, object>)entity["pos"];
                 var rot = (Dictionary<string, object>)entity["rot"];
 
-                entity.Add("position",
-                    quaternionRotation * new Vector3(Convert.ToSingle(pos["x"]), Convert.ToSingle(pos["y"]),
-                        Convert.ToSingle(pos["z"])) + startPos);
+                if (repeatGrid != null && repeatGrid.Grid != null && xCopy != null && yCopy != null && zCopy != null)
+                {
+                    entity.Add("position",
+                        quaternionRotation * new Vector3(
+                            Convert.ToSingle(pos["x"]) + (int)xCopy * (float)repeatGrid.Grid.XOffset,
+                            Convert.ToSingle(pos["y"]) + (int)yCopy * (float)repeatGrid.Grid.YOffset,
+                            Convert.ToSingle(pos["z"]) + (int)zCopy * (float)repeatGrid.Grid.ZOffset) + startPos
+                    );
+                    OffsetRFFrequency(entity, repeatGrid, (int)xCopy, (int)yCopy, (int)zCopy);
+                }
+                else
+                {
+                    entity.Add("position",
+                        quaternionRotation * new Vector3(Convert.ToSingle(pos["x"]), Convert.ToSingle(pos["y"]),
+                            Convert.ToSingle(pos["z"])) + startPos);
+                }
                 entity.Add("rotation",
                     Quaternion.Euler((eulerRotation + new Vector3(Convert.ToSingle(rot["x"]),
                         Convert.ToSingle(rot["y"]), Convert.ToSingle(rot["z"]))) * Mathf.Rad2Deg));
@@ -3914,6 +4022,54 @@ namespace Oxide.Plugins
             }
 
             return preloaddata;
+        }
+
+        private void OffsetRFFrequency(object entity, RepeatGrid repeatGrid, int xCopy, int yCopy, int zCopy)
+        {
+//            if (!(entity is Dictionary<string, object> entityDict))
+//            {
+//                Puts("Here");
+//                return;
+//            }
+//            if (!entityDict["prefabname"].ToString().Contains("rfbroadcaster") && !entityDict["prefabname"].ToString().Contains("rfreceiver"))
+//            {
+//                Puts("Here2 " + entityDict["prefabname"].ToString().Contains("rfbroadcaster") + " " + entityDict["prefabname"].ToString().Contains("rfreceiver"));
+//                return;
+//            }
+//            if (!entityDict.TryGetValue("IOEntity", out object ioEntityObj))
+//            {
+//                Puts("Here3");
+//                return;
+//            }
+//            if (!(ioEntityObj is Dictionary<string, object> ioEntityDict))
+//            {
+//                Puts("Here4");
+//                return;
+//            }
+//            if (!(ioEntityDict["frequency"] is string frequencyString))
+//            {
+//                Puts("Here5");
+//                return;
+//            }
+//            if (!int.TryParse(frequencyString, out int frequency))
+//            {
+//                Puts("Here6");
+//                return;
+//            }
+
+            if (entity is Dictionary<string, object> entityDict &&
+                (entityDict["prefabname"].ToString().Contains("rfbroadcaster") || entityDict["prefabname"].ToString().Contains("rfreceiver")) &&
+                entityDict.TryGetValue("IOEntity", out object ioEntityObj) &&
+                ioEntityObj is Dictionary<string, object> ioEntityDict &&
+                ioEntityDict["frequency"] is int frequency)
+            {
+                 if (entityDict["prefabname"].ToString().Contains("rfbroadcaster") ?
+                    repeatGrid.BroadcasterOffsets.TryGetValue(frequency, out RFOffset rfOffset) :
+                    repeatGrid.ReceiverOffsets.TryGetValue(frequency, out rfOffset))
+                {
+                    ioEntityDict["frequency"] = Math.Clamp(1, frequency + xCopy * rfOffset.XOffset + yCopy * rfOffset.YOffset + zCopy * rfOffset.ZOffset, 999999);
+                }
+            }
         }
 
         private void PreLoadChildrenData(Dictionary<string, object> entity)
@@ -4119,7 +4275,8 @@ namespace Oxide.Plugins
         private ValueTuple<object, PasteData> TryPaste(Vector3 startPos, string filename, IPlayer player,
             float rotationCorrection,
             string[] args, bool autoHeight = true, Action callback = null,
-            Action<BaseEntity> callbackSpawned = null)
+            Action<BaseEntity> callbackSpawned = null, RepeatGrid repeatGrid = null,
+            int? xCopy = null, int? yCopy = null, int? zCopy = null)
         {
             var userId = player?.Id;
 
@@ -4267,7 +4424,8 @@ namespace Oxide.Plugins
 
             startPos.y += heightAdj;
 
-            var preloadData = PreLoadData(data["entities"] as List<object>, startPos, rotationCorrection, deployables, inventories, auth, vending);
+            var preloadData = PreLoadData(data["entities"] as List<object>, startPos, rotationCorrection,
+                deployables, inventories, auth, vending, repeatGrid, xCopy, yCopy, zCopy);
 
             if (autoHeight)
             {
@@ -4675,9 +4833,104 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var entities = new HashSet<BaseEntity>(_lastPastes[player.Id].Pop().ToList());
+            int repeat = 1;
+            if (args.Length >= 1) int.TryParse(args[0], out repeat);
 
-            UndoLoop(entities, player);
+            for (int i = 0; i < repeat; i++)
+            {
+                var entities = new HashSet<BaseEntity>(_lastPastes[player.Id].Pop().ToList());
+
+                UndoLoop(entities, player);
+            }
+        }
+
+        [Command("repeat")]
+        private void CmdRepeat(IPlayer player, string command, string[] args)
+        {
+            if (!HasAccess(player, _undoPermission))
+            {
+                player.Reply(Lang("NO_ACCESS", player.Id));
+                return;
+            }
+
+            if (args.Length < 1)
+            {
+                player.Reply(Lang("SYNTAX_REPEAT"));
+                return;
+            }
+
+            switch (args[0])
+            {
+                case "g":
+                case "grid":
+                    if (args.Length < 7 ||
+                        !int.TryParse(args[1], out int xLength) ||
+                        !int.TryParse(args[2], out int yLength) ||
+                        !int.TryParse(args[3], out int zLength) ||
+                        !float.TryParse(args[4], out float xOffset) ||
+                        !float.TryParse(args[5], out float yOffset) ||
+                        !float.TryParse(args[6], out float zOffset))
+                    {
+                        player.Reply(Lang("SYNTAX_REPEAT_GRID"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].Grid = new Grid(xLength, yLength, zLength, xOffset, yOffset, zOffset);
+
+                    break;
+
+                case "b":
+                case "broadcasterOffset":
+                    if (args.Length < 5 ||
+                        !int.TryParse(args[1], out int frequency) ||
+                        !int.TryParse(args[2], out int xRfOffset) ||
+                        !int.TryParse(args[3], out int yRfOffset) ||
+                        !int.TryParse(args[4], out int zRfOffset))
+                    {
+                        player.Reply(Lang("SYNTAX_TRANSMITTER_OFFSET"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].BroadcasterOffsets[frequency] = new RFOffset(frequency, xRfOffset, yRfOffset, zRfOffset);
+                    break;
+
+                case "r":
+                case "receiverOffset":
+                    if (args.Length < 5 ||
+                        !int.TryParse(args[1], out frequency) ||
+                        !int.TryParse(args[2], out xRfOffset) ||
+                        !int.TryParse(args[3], out yRfOffset) ||
+                        !int.TryParse(args[4], out zRfOffset))
+                    {
+                        player.Reply(Lang("SYNTAX_RECEIVER_OFFSET"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].ReceiverOffsets[frequency] = new RFOffset(frequency, xRfOffset, yRfOffset, zRfOffset);
+
+                    break;
+
+                case "c":
+                case "clear":
+                    if (_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids.Remove(player.Id);
+
+                    break;
+
+                default:
+                    player.Reply(Lang("SYNTAX_REPEAT"));
+
+                    break;
+            }
         }
 
         private static readonly Dictionary<string, string> ReplacePrefab = new Dictionary<string, string>
@@ -5227,6 +5480,53 @@ namespace Oxide.Plugins
                     }
                 },
                 {
+                    "SYNTAX_REPEAT", new Dictionary<string, string>
+                    {
+                        {
+                            "en", "/repeat grid - repeats paste in a grid in X, Y and Z directions specified amount of times with specified offset for each direction\n" +
+                                  "/repeat broadcasterOffset - specified frequency of RF broadcasters changes by specified offset for each paste in X, Y and Z direction\n" +
+                                  "/repeat receiverOffset - specified frequency of RF receivers changes by specified offset for each paste in X, Y and Z direction\n" +
+                                  "/repeat clear - clears the current repeat settings"
+                        },
+                        {
+                            "ru", "/repeat grid - Повторяет вставку в сетке по направлениям X, Y и Z заданное количество раз с указанным смещением для каждого направления\n" +
+                                  "/repeat broadcasterOffset - Заданная частота RF-передатчиков изменяется на указанное смещение при каждой вставке по направлениям X, Y и Z\n" +
+                                  "/repeat receiverOffset - Заданная частота RF-приёмников изменяется на указанное смещение при каждой вставке по направлениям X, Y и Z\n" +
+                                  "/repeat clear - Очищает текущие настройки повторения"
+                        },
+                        {
+                            "nl", "/repeat grid - Herhaalt het plakken in een raster in de X-, Y- en Z-richting een opgegeven aantal keer met een opgegeven verschuiving per richting\n" +
+                                  "/repeat broadcasterOffset - De opgegeven frequentie van RF-zenders verandert met een opgegeven verschuiving bij elke plakactie in de X-, Y- en Z-richting\n" +
+                                  "/repeat receiverOffset - De opgegeven frequentie van RF-ontvangers verandert met een opgegeven verschuiving bij elke plakactie in de X-, Y- en Z-richting\n" +
+                                  "/repeat clear - Сбрасывает текущие настройки повторения"
+                        }
+                    }
+                },
+                {
+                    "SYNTAX_REPEAT_GRID", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat <X Copies> <Y Copies> <Z Copies> <X Offset> <Y Offset> <Z Offset>" },
+                        { "ru", "Синтаксис: /repeat <X копии> <Y копии> <Z копии> <X смещение> <Y смещение> <Z смещение>" },
+                        { "nl", "Syntax: /repeat <X kopieën> <Y kopieën> <Z kopieën> <X verschuiving> <Y verschuiving> <Z verschuiving>" }
+                    }
+                },
+                {
+                    "SYNTAX_TRANSMITTER_OFFSET", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeatBroadcasterFrequency <Frequency> <X Offset> <Y Offset> <Z Offset>" },
+                        { "ru", "Синтаксис: /repeatBroadcasterFrequency <частота> <X смещение> <Y смещение> <Z смещение>" },
+                        { "nl", "Syntax: /repeatBroadcasterFrequency <Frequentie> <X verschuiving> <Y verschuiving> <Z verschuiving>" }
+                    }
+                },
+                {
+                    "SYNTAX_RECEIVER_OFFSET", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeatReceiverFrequency <Frequency> <X Offset> <Y Offset> <Z Offset>" },
+                        { "ru", "Синтаксис: /repeatReceiverFrequency <частота> <X смещение> <Y смещение> <Z смещение>" },
+                        { "nl", "Syntax: /repeatReceiverFrequency <Frequentie> <X verschuiving> <Y verschuiving> <Z verschuiving>" }
+                    }
+                },
+                {
                     "NO_ENTITY_RAY", new Dictionary<string, string>
                     {
                         { "en", "Couldn't ray something valid in front of you" },
@@ -5397,6 +5697,11 @@ namespace Oxide.Plugins
             public bool EnableSaving = true;
             public bool Dlc = true;
             public SkinsMode SkinsMode = SkinsMode.AllSkins;
+
+            public int? xCopy;
+            public int? yCopy;
+            public int? zCopy;
+            public RepeatGrid repeatGrid;
 
             public bool Cancelled = false;
 
