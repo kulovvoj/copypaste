@@ -146,19 +146,13 @@ namespace Oxide.Plugins
         public class RepeatGrid
         {
             public Grid Grid;
-            public Dictionary<int, RFOffset> ReceiverOffsets;
-            public Dictionary<int, RFOffset> BroadcasterOffsets;
+            public RFSettings ReceiverSettings;
+            public RFSettings BroadcasterSettings;
 
             public RepeatGrid()
             {
-                ReceiverOffsets = new Dictionary<int, RFOffset>();
-                BroadcasterOffsets = new Dictionary<int, RFOffset>();
-            }
-            public RepeatGrid(Grid grid, Dictionary<int, RFOffset> receiverOffsets, Dictionary<int, RFOffset> broadcasterOffsets)
-            {
-                Grid = grid;
-                ReceiverOffsets = receiverOffsets;
-                BroadcasterOffsets = broadcasterOffsets;
+                ReceiverSettings = new RFSettings();
+                BroadcasterSettings = new RFSettings();
             }
         }
 
@@ -182,6 +176,24 @@ namespace Oxide.Plugins
             }
         }
 
+        public class RFSettings
+        {
+            public int Addend;
+            public Dictionary<int, RFOffset> Offsets;
+            public Dictionary<int, RFCycle> Cycles;
+            public Dictionary<int, RFModulo> Moduli;
+            public Dictionary<int, RFWall> Walls;
+
+            public RFSettings()
+            {
+                Addend = 0;
+                Offsets = new Dictionary<int, RFOffset>();
+                Cycles = new Dictionary<int, RFCycle>();
+                Moduli = new Dictionary<int, RFModulo>();
+                Walls = new Dictionary<int, RFWall>();
+            }
+        }
+
         public class RFOffset
         {
             public int Frequency;
@@ -195,6 +207,60 @@ namespace Oxide.Plugins
                 XOffset = xOffset;
                 YOffset = yOffset;
                 ZOffset = zOffset;
+            }
+        }
+
+        public class RFWall
+        {
+            public int Frequency;
+            public int XMin;
+            public int XMax;
+            public int YMin;
+            public int YMax;
+            public int ZMin;
+            public int ZMax;
+
+            public RFWall(int frequency, int xMin, int xMax, int yMin, int yMax, int zMin, int zMax)
+            {
+                Frequency = frequency;
+                XMin = xMin;
+                XMax = xMax;
+                YMin = yMin;
+                YMax = yMax;
+                ZMin = zMin;
+                ZMax = zMax;
+            }
+        }
+
+        public class RFCycle
+        {
+            public int Frequency;
+            public int PrimaryFrequency;
+            public int SecondaryFrequency;
+            public int HalfPeriod;
+            public string AxisPriority;
+
+            public RFCycle(int frequency, int primaryFrequency, int secondaryFrequency, int halfPeriod, string axisPriority)
+            {
+                Frequency = frequency;
+                PrimaryFrequency = primaryFrequency;
+                SecondaryFrequency = secondaryFrequency;
+                HalfPeriod = halfPeriod;
+                AxisPriority = axisPriority;
+            }
+        }
+
+        public class RFModulo
+        {
+            public int Frequency;
+            public int FrequencyOffset;
+            public int Modulo;
+
+            public RFModulo(int frequency, int frequencyOffset, int modulo)
+            {
+                Frequency = frequency;
+                FrequencyOffset = frequencyOffset;
+                Modulo = modulo;
             }
         }
 
@@ -3998,7 +4064,7 @@ namespace Oxide.Plugins
                             Convert.ToSingle(pos["y"]) + (int)yCopy * (float)repeatGrid.Grid.YOffset,
                             Convert.ToSingle(pos["z"]) + (int)zCopy * (float)repeatGrid.Grid.ZOffset) + startPos
                     );
-                    OffsetRFFrequency(entity, repeatGrid, (int)xCopy, (int)yCopy, (int)zCopy);
+                    OverrideRFFrequency(entity, repeatGrid, (int)xCopy, (int)yCopy, (int)zCopy);
                 }
                 else
                 {
@@ -4024,52 +4090,73 @@ namespace Oxide.Plugins
             return preloaddata;
         }
 
-        private void OffsetRFFrequency(object entity, RepeatGrid repeatGrid, int xCopy, int yCopy, int zCopy)
+        private void OverrideRFFrequency(object entity, RepeatGrid repeatGrid, int xCopy, int yCopy, int zCopy)
         {
-//            if (!(entity is Dictionary<string, object> entityDict))
-//            {
-//                Puts("Here");
-//                return;
-//            }
-//            if (!entityDict["prefabname"].ToString().Contains("rfbroadcaster") && !entityDict["prefabname"].ToString().Contains("rfreceiver"))
-//            {
-//                Puts("Here2 " + entityDict["prefabname"].ToString().Contains("rfbroadcaster") + " " + entityDict["prefabname"].ToString().Contains("rfreceiver"));
-//                return;
-//            }
-//            if (!entityDict.TryGetValue("IOEntity", out object ioEntityObj))
-//            {
-//                Puts("Here3");
-//                return;
-//            }
-//            if (!(ioEntityObj is Dictionary<string, object> ioEntityDict))
-//            {
-//                Puts("Here4");
-//                return;
-//            }
-//            if (!(ioEntityDict["frequency"] is string frequencyString))
-//            {
-//                Puts("Here5");
-//                return;
-//            }
-//            if (!int.TryParse(frequencyString, out int frequency))
-//            {
-//                Puts("Here6");
-//                return;
-//            }
-
             if (entity is Dictionary<string, object> entityDict &&
-                (entityDict["prefabname"].ToString().Contains("rfbroadcaster") || entityDict["prefabname"].ToString().Contains("rfreceiver")) &&
                 entityDict.TryGetValue("IOEntity", out object ioEntityObj) &&
                 ioEntityObj is Dictionary<string, object> ioEntityDict &&
-                ioEntityDict["frequency"] is int frequency)
+                ioEntityDict.TryGetValue("frequency", out object frequencyObj) &&
+                frequencyObj is int frequency)
             {
-                 if (entityDict["prefabname"].ToString().Contains("rfbroadcaster") ?
-                    repeatGrid.BroadcasterOffsets.TryGetValue(frequency, out RFOffset rfOffset) :
-                    repeatGrid.ReceiverOffsets.TryGetValue(frequency, out rfOffset))
+                if (entityDict["prefabname"].ToString().Contains("rfbroadcaster"))
                 {
-                    ioEntityDict["frequency"] = Math.Clamp(1, frequency + xCopy * rfOffset.XOffset + yCopy * rfOffset.YOffset + zCopy * rfOffset.ZOffset, 999999);
+                    frequency = CalculateRFFrequency(frequency, repeatGrid.BroadcasterSettings, repeatGrid, xCopy, yCopy, zCopy);
+                    ioEntityDict["frequency"] = Math.Clamp(1, frequency, 999999);
+                }
+                else if (entityDict["prefabname"].ToString().Contains("rfreceiver"))
+                {
+                    frequency = CalculateRFFrequency(frequency, repeatGrid.ReceiverSettings, repeatGrid, xCopy, yCopy, zCopy);
+                    ioEntityDict["frequency"] = Math.Clamp(1, frequency, 999999);
                 }
             }
+        }
+
+        private int CalculateRFFrequency(int frequency, RFSettings rfSettings, RepeatGrid repeatGrid, int xCopy, int yCopy, int zCopy) {
+            int newFrequency = frequency;
+            if (rfSettings.Cycles.TryGetValue(frequency, out RFCycle rfCycle))
+            {
+                var bitValue = rfCycle.HalfPeriod;
+                var position = 1;
+                switch (rfCycle.AxisPriority)
+                {
+                    case "xyz":
+                        position = xCopy + yCopy * repeatGrid.Grid.X + zCopy * repeatGrid.Grid.X * repeatGrid.Grid.Y;
+                        break;
+                    case "xzy":
+                        position = xCopy + zCopy * repeatGrid.Grid.X + yCopy * repeatGrid.Grid.X * repeatGrid.Grid.Z;
+                        break;
+                    case "yxz":
+                        position = yCopy + xCopy * repeatGrid.Grid.Y + zCopy * repeatGrid.Grid.Y * repeatGrid.Grid.X;
+                        break;
+                    case "yzx":
+                        position = yCopy + zCopy * repeatGrid.Grid.Y + xCopy * repeatGrid.Grid.Y * repeatGrid.Grid.Z;
+                        break;
+                    case "zxy":
+                        position = zCopy + xCopy * repeatGrid.Grid.Z + yCopy * repeatGrid.Grid.Z * repeatGrid.Grid.X;
+                        break;
+                    case "zyx":
+                        position = zCopy + yCopy * repeatGrid.Grid.Z + xCopy * repeatGrid.Grid.Z * repeatGrid.Grid.Y;
+                        break;
+                    default:
+                        break;
+                }
+                Puts("Position: " + position);
+                newFrequency = position % (bitValue * 2) / bitValue == 0 ? rfCycle.PrimaryFrequency : rfCycle.SecondaryFrequency;
+            }
+            if (rfSettings.Offsets.TryGetValue(frequency, out RFOffset rfOffset))
+                newFrequency += xCopy * rfOffset.XOffset + yCopy * rfOffset.YOffset + zCopy * rfOffset.ZOffset;
+            if (rfSettings.Moduli.TryGetValue(frequency, out RFModulo rfModulo))
+                newFrequency = (newFrequency - rfModulo.FrequencyOffset) % rfModulo.Modulo + rfModulo.FrequencyOffset;
+            if (rfSettings.Walls.TryGetValue(frequency, out RFWall wall))
+            {
+                if (xCopy == 0 && wall.XMin != 0) newFrequency = wall.XMin;
+                else if (xCopy == repeatGrid.Grid.X - 1 && wall.XMax != 0) newFrequency = wall.XMax;
+                else if (yCopy == 0 && wall.YMin != 0) newFrequency = wall.YMin;
+                else if (yCopy == repeatGrid.Grid.Y - 1 && wall.YMax != 0) newFrequency = wall.YMax;
+                else if (zCopy == 0 && wall.ZMin != 0) newFrequency = wall.ZMin;
+                else if (zCopy == repeatGrid.Grid.Z - 1 && wall.ZMax != 0) newFrequency = wall.ZMax;
+            }
+            return newFrequency + rfSettings.Addend;
         }
 
         private void PreLoadChildrenData(Dictionary<string, object> entity)
@@ -4859,7 +4946,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            switch (args[0])
+            switch (args[0].ToLower())
             {
                 case "g":
                 case "grid":
@@ -4882,26 +4969,27 @@ namespace Oxide.Plugins
 
                     break;
 
-                case "b":
-                case "broadcasterOffset":
+                case "bo":
+                case "broadcasteroffset":
                     if (args.Length < 5 ||
                         !int.TryParse(args[1], out int frequency) ||
                         !int.TryParse(args[2], out int xRfOffset) ||
                         !int.TryParse(args[3], out int yRfOffset) ||
                         !int.TryParse(args[4], out int zRfOffset))
                     {
-                        player.Reply(Lang("SYNTAX_TRANSMITTER_OFFSET"));
+                        player.Reply(Lang("SYNTAX_BROADCASTER_OFFSET"));
                         return;
                     };
 
                     if (!_repeatGrids.ContainsKey(player.Id))
                         _repeatGrids[player.Id] = new RepeatGrid();
 
-                    _repeatGrids[player.Id].BroadcasterOffsets[frequency] = new RFOffset(frequency, xRfOffset, yRfOffset, zRfOffset);
+                    _repeatGrids[player.Id].BroadcasterSettings.Offsets[frequency] = new RFOffset(frequency, xRfOffset, yRfOffset, zRfOffset);
+
                     break;
 
-                case "r":
-                case "receiverOffset":
+                case "ro":
+                case "receiveroffset":
                     if (args.Length < 5 ||
                         !int.TryParse(args[1], out frequency) ||
                         !int.TryParse(args[2], out xRfOffset) ||
@@ -4915,7 +5003,179 @@ namespace Oxide.Plugins
                     if (!_repeatGrids.ContainsKey(player.Id))
                         _repeatGrids[player.Id] = new RepeatGrid();
 
-                    _repeatGrids[player.Id].ReceiverOffsets[frequency] = new RFOffset(frequency, xRfOffset, yRfOffset, zRfOffset);
+                    _repeatGrids[player.Id].ReceiverSettings.Offsets[frequency] = new RFOffset(frequency, xRfOffset, yRfOffset, zRfOffset);
+
+                    break;
+
+                case "bw":
+                case "broadcasterwall":
+                    if (args.Length < 8 ||
+                        !int.TryParse(args[1], out frequency) ||
+                        !int.TryParse(args[2], out int xMinFrequency) ||
+                        !int.TryParse(args[3], out int xMaxFrequency) ||
+                        !int.TryParse(args[4], out int yMinFrequency) ||
+                        !int.TryParse(args[5], out int yMaxFrequency) ||
+                        !int.TryParse(args[6], out int zMinFrequency) ||
+                        !int.TryParse(args[7], out int zMaxFrequency))
+                    {
+                        player.Reply(Lang("SYNTAX_BROADCASTER_WALL"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].BroadcasterSettings.Walls[frequency] = new RFWall(frequency, xMinFrequency, xMaxFrequency, yMinFrequency, yMaxFrequency, zMinFrequency, zMaxFrequency);
+
+                    break;
+
+                case "rw":
+                case "receiverwall":
+                    if (args.Length < 8 ||
+                        !int.TryParse(args[1], out frequency) ||
+                        !int.TryParse(args[2], out xMinFrequency) ||
+                        !int.TryParse(args[3], out xMaxFrequency) ||
+                        !int.TryParse(args[4], out yMinFrequency) ||
+                        !int.TryParse(args[5], out yMaxFrequency) ||
+                        !int.TryParse(args[6], out zMinFrequency) ||
+                        !int.TryParse(args[7], out zMaxFrequency))
+                    {
+                        player.Reply(Lang("SYNTAX_RECEIVER_WALL"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].ReceiverSettings.Walls[frequency] = new RFWall(frequency, xMinFrequency, xMaxFrequency, yMinFrequency, yMaxFrequency, zMinFrequency, zMaxFrequency);
+
+                    break;
+
+                case "bm":
+                case "broadcastermodulo":
+                    if (args.Length < 4 ||
+                        !int.TryParse(args[1], out frequency) ||
+                        !int.TryParse(args[2], out int frequencyOffset) ||
+                        !int.TryParse(args[3], out int modulo))
+                    {
+                        player.Reply(Lang("SYNTAX_BROADCASTER_MODULO"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].BroadcasterSettings.Moduli[frequency] = new RFModulo(frequency, frequencyOffset, modulo);
+
+                    break;
+
+                case "rm":
+                case "receiverwmodulo":
+                    if (args.Length < 4 ||
+                        !int.TryParse(args[1], out frequency) ||
+                        !int.TryParse(args[2], out frequencyOffset) ||
+                        !int.TryParse(args[3], out modulo))
+                    {
+                        player.Reply(Lang("SYNTAX_RECEIVER_MODULO"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].ReceiverSettings.Moduli[frequency] = new RFModulo(frequency, frequencyOffset, modulo);
+
+                    break;
+
+                case "bc":
+                case "broadcastercycle":
+                    if (args.Length < 6 ||
+                        !int.TryParse(args[1], out frequency) ||
+                        !int.TryParse(args[2], out int primaryFrequency) ||
+                        !int.TryParse(args[3], out int secondaryFrequency) ||
+                        !int.TryParse(args[4], out int halfPeriod))
+                    {
+                        player.Reply(Lang("SYNTAX_BROADCASTER_CYCLE"));
+                        return;
+                    };
+
+                    string axisPriority = args[5].ToLower();
+                    if (axisPriority != "xyz" &&
+                        axisPriority != "xzy" &&
+                        axisPriority != "yxz" &&
+                        axisPriority != "yzx" &&
+                        axisPriority != "zxy" &&
+                        axisPriority != "zyx")
+                    {
+                        player.Reply(Lang("SYNTAX_BROADCASTER_CYCLE"));
+                        return;
+                    }
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].BroadcasterSettings.Cycles[frequency] = new RFCycle(frequency, primaryFrequency, secondaryFrequency, halfPeriod, axisPriority);
+
+                    break;
+
+                case "rc":
+                case "receivercycle":
+                    if (args.Length < 6 ||
+                        !int.TryParse(args[1], out frequency) ||
+                        !int.TryParse(args[2], out primaryFrequency) ||
+                        !int.TryParse(args[3], out secondaryFrequency) ||
+                        !int.TryParse(args[4], out halfPeriod))
+                    {
+                        player.Reply(Lang("SYNTAX_RECEIVER_CYCLE"));
+                        return;
+                    };
+
+                    axisPriority = args[5].ToLower();
+                    if (axisPriority != "xyz" &&
+                        axisPriority != "xzy" &&
+                        axisPriority != "yxz" &&
+                        axisPriority != "yzx" &&
+                        axisPriority != "zxy" &&
+                        axisPriority != "zyx")
+                    {
+                        player.Reply(Lang("SYNTAX_RECEIVER_CYCLE"));
+                        return;
+                    }
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].ReceiverSettings.Cycles[frequency] = new RFCycle(frequency, primaryFrequency, secondaryFrequency, halfPeriod, axisPriority);
+
+                    break;
+
+                case "ba":
+                case "broadcasteradd":
+                    if (args.Length < 2 || !int.TryParse(args[1], out int addend))
+                    {
+                        player.Reply(Lang("SYNTAX_BROADCASTER_ADDEND"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].BroadcasterSettings.Addend = addend;
+
+                    break;
+
+                case "ra":
+                case "receiveradd":
+                    if (args.Length < 2 || !int.TryParse(args[1], out addend))
+                    {
+                        player.Reply(Lang("SYNTAX_RECEIVER_ADDEND"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].ReceiverSettings.Addend = addend;
 
                     break;
 
@@ -5484,21 +5744,30 @@ namespace Oxide.Plugins
                     {
                         {
                             "en", "/repeat grid - repeats paste in a grid in X, Y and Z directions specified amount of times with specified offset for each direction\n" +
-                                  "/repeat broadcasterOffset - specified frequency of RF broadcasters changes by specified offset for each paste in X, Y and Z direction\n" +
-                                  "/repeat receiverOffset - specified frequency of RF receivers changes by specified offset for each paste in X, Y and Z direction\n" +
-                                  "/repeat clear - clears the current repeat settings"
+                                  "/repeat [broadcasterOffset/receiverOffset] - specified frequency of RF changes by specified offset for each paste in X, Y and Z direction\n" +
+                                  "/repeat [broadcasterWall/receiverWall] - overrides specified frequency at the edges of the grid\n" +
+                                  "/repeat [broadcasterModulo/receiverModulo] - applies modulo on specified frequency, best to pair with other settings\n" +
+                                  "/repeat [broadcasterCycle/receiverCycle] - alternates between 2 frequencies\n" +
+                                  "/repeat [broadcasterAdd/receiverAdd] - adds a number to all frequencies\n" +
+                                  "/repeat clear - clears the current settings"
                         },
                         {
                             "ru", "/repeat grid - Повторяет вставку в сетке по направлениям X, Y и Z заданное количество раз с указанным смещением для каждого направления\n" +
-                                  "/repeat broadcasterOffset - Заданная частота RF-передатчиков изменяется на указанное смещение при каждой вставке по направлениям X, Y и Z\n" +
-                                  "/repeat receiverOffset - Заданная частота RF-приёмников изменяется на указанное смещение при каждой вставке по направлениям X, Y и Z\n" +
-                                  "/repeat clear - Очищает текущие настройки повторения"
+                                  "/repeat [broadcasterOffset/receiverOffset] - Заданная частота изменяется на указанное смещение при каждой вставке по направлениям X, Y и Z\n" +
+                                  "/repeat [broadcasterWall/receiverWall] - Переопределяет заданную частоту на границах сетки\n" +
+                                  "/repeat [broadcasterModulo/receiverModulo] - Применяет модуль к заданной частоте; лучше сочетать с другими параметрами\n" +
+                                  "/repeat [broadcasterCycle/receiverCycle] - Чередуется между двумя частотами\n" +
+                                  "/repeat [broadcasterAdd/receiverAdd] - Прибавляет число ко всем частотам\n" +
+                                  "/repeat clear - Сбрасывает текущие настройки"
                         },
                         {
                             "nl", "/repeat grid - Herhaalt het plakken in een raster in de X-, Y- en Z-richting een opgegeven aantal keer met een opgegeven verschuiving per richting\n" +
-                                  "/repeat broadcasterOffset - De opgegeven frequentie van RF-zenders verandert met een opgegeven verschuiving bij elke plakactie in de X-, Y- en Z-richting\n" +
-                                  "/repeat receiverOffset - De opgegeven frequentie van RF-ontvangers verandert met een opgegeven verschuiving bij elke plakactie in de X-, Y- en Z-richting\n" +
-                                  "/repeat clear - Сбрасывает текущие настройки повторения"
+                                  "/repeat [broadcasterOffset/receiverOffset] - De opgegeven frequentie verandert met een opgegeven verschuiving bij elke plakactie in de X-, Y- en Z-richting\n" +
+                                  "/repeat [broadcasterWall/receiverWall] - Overschrijft de opgegeven frequentie aan de randen van het raster\n" +
+                                  "/repeat [broadcasterModulo/receiverModulo] - Past modulo toe op de opgegeven frequentie; het beste te combineren met andere instellingen\n" +
+                                  "/repeat [broadcasterCycle/receiverCycle] - Wisselt af tussen twee frequenties\n" +
+                                  "/repeat [broadcasterAdd/receiverAdd] - Voegt een getal toe aan alle frequenties\n" +
+                                  "/repeat clear - Wis de huidige instellingen"
                         }
                     }
                 },
@@ -5511,19 +5780,92 @@ namespace Oxide.Plugins
                     }
                 },
                 {
-                    "SYNTAX_TRANSMITTER_OFFSET", new Dictionary<string, string>
+                    "SYNTAX_BROADCASTER_OFFSET", new Dictionary<string, string>
                     {
-                        { "en", "Syntax: /repeatBroadcasterFrequency <Frequency> <X Offset> <Y Offset> <Z Offset>" },
-                        { "ru", "Синтаксис: /repeatBroadcasterFrequency <частота> <X смещение> <Y смещение> <Z смещение>" },
-                        { "nl", "Syntax: /repeatBroadcasterFrequency <Frequentie> <X verschuiving> <Y verschuiving> <Z verschuiving>" }
+                        { "en", "Syntax: /repeat broadcasterOffset <Original Frequency> <X Offset> <Y Offset> <Z Offset>" },
+                        { "ru", "Синтаксис: /repeat broadcasterOffset <Исходная частота> <X смещение> <Y смещение> <Z смещение>" },
+                        { "nl", "Syntax: /repeat broadcasterOffset <Oorspronkelijke frequentie> <X verschuiving> <Y verschuiving> <Z verschuiving>" }
                     }
                 },
                 {
                     "SYNTAX_RECEIVER_OFFSET", new Dictionary<string, string>
                     {
-                        { "en", "Syntax: /repeatReceiverFrequency <Frequency> <X Offset> <Y Offset> <Z Offset>" },
-                        { "ru", "Синтаксис: /repeatReceiverFrequency <частота> <X смещение> <Y смещение> <Z смещение>" },
-                        { "nl", "Syntax: /repeatReceiverFrequency <Frequentie> <X verschuiving> <Y verschuiving> <Z verschuiving>" }
+                        { "en", "Syntax: /repeat receiverOffset <Original Frequency> <X Offset> <Y Offset> <Z Offset>" },
+                        { "ru", "Синтаксис: /repeat receiverOffset <Исходная частота> <X смещение> <Y смещение> <Z смещение>" },
+                        { "nl", "Syntax: /repeat receiverOffset <Oorspronkelijke frequentie> <X verschuiving> <Y verschuiving> <Z verschuiving>" }
+                    }
+                },
+                {
+                    "SYNTAX_BROADCASTER_WALL", new Dictionary<string, string>
+                    {
+                        {
+                            "en", "Syntax: /repeat broadcasterWall <Original Frequency> <X = 1 Frequency> <X = Max Frequency> <Y = 1 Frequency> <Y = Max Frequency> <Z = 1 Frequency> <Z = Max Frequency>\n" +
+                                  "Set frequency to 0 if you do not want to override that particular side."
+                        },
+                        {
+                            "ru", "Синтаксис: /repeat broadcasterWall <Исходная частота> <X = 1 частота> <X = макс частота> <Y = 1 частота> <Y = макс частота> <Z = 1 частота> <Z = макс частота>\n" +
+                                  "Установите частоту в 0, если не хотите изменять эту сторону."
+                        },
+                        {
+                            "nl", "Syntax: /repeat broadcasterWall <Oorspronkelijke frequentie> <X = 1 Frequentie> <X = Max Frequentie> <Y = 1 Frequentie> <Y = Max Frequentie> <Z = 1 Frequentie> <Z = Max Frequentie>\n" +
+                                  "Stel de frequentie in op 0 als je die kant niet wilt overschrijven."
+                        }
+                    }
+                },
+                {
+                    "SYNTAX_RECEIVER_WALL", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat receiverWall <Original Frequency> <X = 1 Frequency> <X = Max Frequency> <Y = 1 Frequency> <Y = Max Frequency> <Z = 1 Frequency> <Z = Max Frequency>" },
+                        { "ru", "Синтаксис: /repeat receiverWall <Исходная частота> <X = 1 частота> <X = макс частота> <Y = 1 частота> <Y = макс частота> <Z = 1 частота> <Z = макс частота>" },
+                        { "nl", "Syntax: /repeat receiverWall <Oorspronkelijke frequentie> <X = 1 Frequentie> <X = Max Frequentie> <Y = 1 Frequentie> <Y = Max Frequentie> <Z = 1 Frequentie> <Z = Max Frequentie>" }
+                    }
+                },
+                {
+                    "SYNTAX_BROADCASTER_MODULO", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat broadcasterModulo <Original Frequency> <Frequency Offset> <Modulo>" },
+                        { "ru", "Синтаксис: /repeat broadcasterModulo <Исходная частота> <Смещение частоты> <модуль>" },
+                        { "nl", "Syntax: /repeat broadcasterModulo <Oorspronkelijke frequentie> <Frequentie-offset> <Modulo>" }
+                    }
+                },
+                {
+                    "SYNTAX_RECEIVER_MODULO", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat receiverModulo <Original Frequency> <Frequency Offset> <Modulo>" },
+                        { "ru", "Синтаксис: /repeat receiverModulo <Исходная частота> <Смещение частоты> <модуль>" },
+                        { "nl", "Syntax: /repeat receiverModulo <Oorspronkelijke frequentie> <Frequentie-offset> <Modulo>" }
+                    }
+                },
+                {
+                    "SYNTAX_BROADCASTER_CYCLE", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat broadcasterCycle <Original Frequency> <1st frequency> <2nd frequency> <Bit Position> <Orientation - XYZ/XZY...>" },
+                        { "ru", "Синтаксис: /repeat broadcasterCycle <Исходная частота> <Частота значения «False»> <Частота значения «True»> <Позиция бита> <Ориентация - XYZ/XZY...>" },
+                        { "nl", "Syntax: /repeat broadcasterCycle <Oorspronkelijke frequentie> <Frequentie van False> <Frequentie van True> <Bitpositie> <Oriëntatie - XYZ/XZY...>" }
+                    }
+                },
+                {
+                    "SYNTAX_RECEIVER_CYCLE", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat receiverCycle <Original Frequency> <Frequency of value False> <Frequency of value True> <Bit Position> <Orientation - XYZ/XZY...>" },
+                        { "ru", "Синтаксис: /repeat receiverCycle <Исходная частота> <Частота значения «False»> <Частота значения «True»> <Позиция бита> <Ориентация - XYZ/XZY...>" },
+                        { "nl", "Syntax: /repeat receiverCycle <Oorspronkelijke frequentie> <Frequentie van False> <Frequentie van True> <Bitpositie> <Oriëntatie - XYZ/XZY...>" }
+                    }
+                },
+                {
+                    "SYNTAX_BROADCASTER_ADD", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat broadcasterAdd <Frequency>" },
+                        { "ru", "Синтаксис: /repeat broadcasterAdd <частота>" },
+                        { "nl", "Syntax: /repeat broadcasterAdd <Frequentie>" }
+                    }
+                },
+                {
+                    "SYNTAX_RECEIVER_ADD", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat receiverAdd <Frequency>" },
+                        { "ru", "Синтаксис: /repeat receiverAdd <частота>" },
+                        { "nl", "Syntax: /repeat receiverAdd <Frequentie>" }
                     }
                 },
                 {
