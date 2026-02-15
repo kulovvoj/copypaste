@@ -5743,40 +5743,40 @@ namespace Oxide.Plugins
                     "SYNTAX_REPEAT", new Dictionary<string, string>
                     {
                         {
-                            "en", "/repeat grid - repeats paste in a grid in X, Y and Z directions specified amount of times with specified offset for each direction\n" +
-                                  "/repeat [broadcasterOffset/receiverOffset] - specified frequency of RF changes by specified offset for each paste in X, Y and Z direction\n" +
-                                  "/repeat [broadcasterWall/receiverWall] - overrides specified frequency at the edges of the grid\n" +
-                                  "/repeat [broadcasterModulo/receiverModulo] - applies modulo on specified frequency, best to pair with other settings\n" +
-                                  "/repeat [broadcasterCycle/receiverCycle] - alternates between 2 frequencies\n" +
-                                  "/repeat [broadcasterAdd/receiverAdd] - adds a number to all frequencies\n" +
-                                  "/repeat clear - clears the current settings"
+                            "en", "<color=yellow>/repeat grid</color> - repeats paste in a grid in X, Y and Z directions specified amount of times with specified offset for each direction\n" +
+                                  "<color=yellow>/repeat [broadcasterOffset/receiverOffset]</color> - specified frequency of RF changes by specified offset for each paste in X, Y and Z direction\n" +
+                                  "<color=yellow>/repeat [broadcasterWall/receiverWall]</color> - overrides specified frequency at the edges of the grid\n" +
+                                  "<color=yellow>/repeat [broadcasterModulo/receiverModulo]</color> - applies modulo on specified frequency, best to pair with other settings\n" +
+                                  "<color=yellow>/repeat [broadcasterCycle/receiverCycle]</color> - alternates between 2 frequencies\n" +
+                                  "<color=yellow>/repeat [broadcasterAdd/receiverAdd]</color> - adds a number to all frequencies\n" +
+                                  "<color=yellow>/repeat clear</color> - clears the current settings"
                         },
                         {
-                            "ru", "/repeat grid - Повторяет вставку в сетке по направлениям X, Y и Z заданное количество раз с указанным смещением для каждого направления\n" +
-                                  "/repeat [broadcasterOffset/receiverOffset] - Заданная частота изменяется на указанное смещение при каждой вставке по направлениям X, Y и Z\n" +
-                                  "/repeat [broadcasterWall/receiverWall] - Переопределяет заданную частоту на границах сетки\n" +
-                                  "/repeat [broadcasterModulo/receiverModulo] - Применяет модуль к заданной частоте; лучше сочетать с другими параметрами\n" +
-                                  "/repeat [broadcasterCycle/receiverCycle] - Чередуется между двумя частотами\n" +
-                                  "/repeat [broadcasterAdd/receiverAdd] - Прибавляет число ко всем частотам\n" +
-                                  "/repeat clear - Сбрасывает текущие настройки"
+                            "ru", "<color=yellow>/repeat grid</color> - Повторяет вставку в сетке по направлениям X, Y и Z заданное количество раз с указанным смещением для каждого направления\n" +
+                                  "<color=yellow>/repeat [broadcasterOffset/receiverOffset]</color> - Заданная частота изменяется на указанное смещение при каждой вставке по направлениям X, Y и Z\n" +
+                                  "<color=yellow>/repeat [broadcasterWall/receiverWall]</color> - Переопределяет заданную частоту на границах сетки\n" +
+                                  "<color=yellow>/repeat [broadcasterModulo/receiverModulo]</color> - Применяет модуль к заданной частоте; лучше сочетать с другими параметрами\n" +
+                                  "<color=yellow>/repeat [broadcasterCycle/receiverCycle]</color> - Чередуется между двумя частотами\n" +
+                                  "<color=yellow>/repeat [broadcasterAdd/receiverAdd]</color> - Прибавляет число ко всем частотам\n" +
+                                  "<color=yellow>/repeat clear</color> - Сбрасывает текущие настройки"
                         },
                         {
-                            "nl", "/repeat grid - Herhaalt het plakken in een raster in de X-, Y- en Z-richting een opgegeven aantal keer met een opgegeven verschuiving per richting\n" +
-                                  "/repeat [broadcasterOffset/receiverOffset] - De opgegeven frequentie verandert met een opgegeven verschuiving bij elke plakactie in de X-, Y- en Z-richting\n" +
-                                  "/repeat [broadcasterWall/receiverWall] - Overschrijft de opgegeven frequentie aan de randen van het raster\n" +
-                                  "/repeat [broadcasterModulo/receiverModulo] - Past modulo toe op de opgegeven frequentie; het beste te combineren met andere instellingen\n" +
-                                  "/repeat [broadcasterCycle/receiverCycle] - Wisselt af tussen twee frequenties\n" +
-                                  "/repeat [broadcasterAdd/receiverAdd] - Voegt een getal toe aan alle frequenties\n" +
-                                  "/repeat clear - Wis de huidige instellingen"
+                            "nl", "<color=yellow>/repeat grid</color> - Herhaalt het plakken in een raster in de X-, Y- en Z-richting een opgegeven aantal keer met een opgegeven verschuiving per richting\n" +
+                                  "<color=yellow>/repeat [broadcasterOffset/receiverOffset]</color> - De opgegeven frequentie verandert met een opgegeven verschuiving bij elke plakactie in de X-, Y- en Z-richting\n" +
+                                  "<color=yellow>/repeat [broadcasterWall/receiverWall]</color> - Overschrijft de opgegeven frequentie aan de randen van het raster\n" +
+                                  "<color=yellow>/repeat [broadcasterModulo/receiverModulo]</color> - Past modulo toe op de opgegeven frequentie; het beste te combineren met andere instellingen\n" +
+                                  "<color=yellow>/repeat [broadcasterCycle/receiverCycle]</color> - Wisselt af tussen twee frequenties\n" +
+                                  "<color=yellow>/repeat [broadcasterAdd/receiverAdd]</color> - Voegt een getal toe aan alle frequenties\n" +
+                                  "<color=yellow>/repeat clear</color> - Wis de huidige instellingen"
                         }
                     }
                 },
                 {
                     "SYNTAX_REPEAT_GRID", new Dictionary<string, string>
                     {
-                        { "en", "Syntax: /repeat <X Copies> <Y Copies> <Z Copies> <X Offset> <Y Offset> <Z Offset>" },
-                        { "ru", "Синтаксис: /repeat <X копии> <Y копии> <Z копии> <X смещение> <Y смещение> <Z смещение>" },
-                        { "nl", "Syntax: /repeat <X kopieën> <Y kopieën> <Z kopieën> <X verschuiving> <Y verschuiving> <Z verschuiving>" }
+                        { "en", "Syntax: /repeat grid <X Copies> <Y Copies> <Z Copies> <X Offset> <Y Offset> <Z Offset>" },
+                        { "ru", "Синтаксис: /repeat grid <X копии> <Y копии> <Z копии> <X смещение> <Y смещение> <Z смещение>" },
+                        { "nl", "Syntax: /repeat grid <X kopieën> <Y kopieën> <Z kopieën> <X verschuiving> <Y verschuiving> <Z verschuiving>" }
                     }
                 },
                 {
