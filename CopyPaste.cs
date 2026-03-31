@@ -76,6 +76,8 @@ namespace Oxide.Plugins
             new Dictionary<string, Stack<List<BaseEntity>>>();
         private Dictionary<string, RepeatGrid> _repeatGrids =
             new Dictionary<string, RepeatGrid>();
+        private Queue<PasteConfig> _pastesQueue = new Queue<PasteConfig>();
+        private bool isPasting = false;
 
         private Dictionary<string, SignSize> _signSizes = new Dictionary<string, SignSize>
         {
@@ -143,6 +145,42 @@ namespace Oxide.Plugins
             }
         }
 
+        private class PasteConfig
+        {
+            public Vector3 startPos;
+            public string filename;
+            public IPlayer player;
+            public float rotationCorrection;
+            public string[] args;
+            public bool autoHeight;
+            public Action callback;
+            public Action<BaseEntity> callbackSpawned;
+            public RepeatGrid repeatGrid;
+            public int? xCopy;
+            public int? yCopy;
+            public int? zCopy;
+
+            public PasteConfig(Vector3 startPos, string filename, IPlayer player,
+                                           float rotationCorrection,
+                                           string[] args, bool autoHeight = true, Action callback = null,
+                                           Action<BaseEntity> callbackSpawned = null, RepeatGrid repeatGrid = null,
+                                           int? xCopy = null, int? yCopy = null, int? zCopy = null)
+            {
+                this.startPos = startPos;
+                this.filename = filename;
+                this.player = player;
+                this.rotationCorrection = rotationCorrection;
+                this.args = args;
+                this.autoHeight = autoHeight;
+                this.callback = callback;
+                this.callbackSpawned = callbackSpawned;
+                this.repeatGrid = repeatGrid;
+                this.xCopy = xCopy;
+                this.yCopy = yCopy;
+                this.zCopy = zCopy;
+            }
+        }
+
         public class RepeatGrid
         {
             public Grid Grid;
@@ -179,19 +217,39 @@ namespace Oxide.Plugins
         public class RFSettings
         {
             public int Addend;
+            public List<RFAddendRange> AddendRanges;
             public Dictionary<int, RFOffset> Offsets;
             public Dictionary<int, RFCycle> Cycles;
             public Dictionary<int, RFModulo> Moduli;
             public Dictionary<int, RFWall> Walls;
+            public Dictionary<int, RFReplacement> Replacements;
 
             public RFSettings()
             {
                 Addend = 0;
+                AddendRanges = new List<RFAddendRange>();
                 Offsets = new Dictionary<int, RFOffset>();
                 Cycles = new Dictionary<int, RFCycle>();
                 Moduli = new Dictionary<int, RFModulo>();
                 Walls = new Dictionary<int, RFWall>();
+                Replacements = new Dictionary<int, RFReplacement>();
             }
+        }
+
+        public class RFAddendRange
+        {
+            public int StartFrequency;
+            public int EndFrequency;
+            public int Addend;
+
+            public RFAddendRange(int startFrequency, int endFrequency, int addend)
+            {
+                StartFrequency = startFrequency;
+                EndFrequency = endFrequency;
+                Addend = addend;
+            }
+
+            public bool Contains(int frequency) => frequency >= StartFrequency && frequency <= EndFrequency;
         }
 
         public class RFOffset
@@ -261,6 +319,18 @@ namespace Oxide.Plugins
                 Frequency = frequency;
                 FrequencyOffset = frequencyOffset;
                 Modulo = modulo;
+            }
+        }
+
+        public class RFReplacement
+        {
+            public int Frequency;
+            public int NewFrequency;
+
+            public RFReplacement(int frequency, int newFrequency)
+            {
+                Frequency = frequency;
+                NewFrequency = newFrequency;
             }
         }
 
@@ -468,6 +538,27 @@ namespace Oxide.Plugins
             ProcessItemDefinitions();
         }
 
+        private void OnTick()
+        {
+            if (!isPasting && _pastesQueue.Count > 0) {
+                PasteConfig paste = _pastesQueue.Dequeue();
+                TryPaste(
+                    paste.startPos,
+                    paste.filename,
+                    paste.player,
+                    paste.rotationCorrection,
+                    paste.args,
+                    paste.autoHeight,
+                    paste.callback,
+                    paste.callbackSpawned,
+                    paste.repeatGrid,
+                    paste.xCopy,
+                    paste.yCopy,
+                    paste.zCopy
+                );
+            }
+        }
+
         // Heavily influenced by k1lly0u's Player DLC API plugin
         private void ProcessItemDefinitions()
         {
@@ -639,10 +730,29 @@ namespace Oxide.Plugins
                     {
                         for (int z = 0; z < repeatGrid.Grid.Z; z++)
                         {
-                            returnVal = TryPaste(hit.point, filename, player.IPlayer,
-                                DegreeToRadian(player.GetNetworkRotation().eulerAngles.y),
-                                args, callback: callback, callbackSpawned: callbackSpawned,
-                                repeatGrid: repeatGrid, xCopy: x, yCopy: y, zCopy: z).Item1;
+                            if (x == 0 && y == 0 && z == 0) {
+                                returnVal = TryPaste(hit.point, filename, player.IPlayer,
+                                    DegreeToRadian(player.GetNetworkRotation().eulerAngles.y),
+                                    args, callback: callback, callbackSpawned: callbackSpawned,
+                                    repeatGrid: repeatGrid, xCopy: x, yCopy: y, zCopy: z).Item1;
+                                if (returnVal is string) {
+                                    return returnVal;
+                                }
+                            } else {
+                                _pastesQueue.Enqueue(new PasteConfig(
+                                    hit.point,
+                                    filename,
+                                    player.IPlayer,
+                                    DegreeToRadian(player.GetNetworkRotation().eulerAngles.y),
+                                    args,
+                                    callback: callback,
+                                    callbackSpawned: callbackSpawned,
+                                    repeatGrid: repeatGrid,
+                                    xCopy: x,
+                                    yCopy: y,
+                                    zCopy: z
+                                ));
+                            }
                         }
                     }
                 }
@@ -1779,7 +1889,7 @@ namespace Oxide.Plugins
             {
                 UndoLoop(new HashSet<BaseEntity>(pasteData.PastedEntities), pasteData.Player,
                     pasteData.PastedEntities.Count);
-                
+                isPasting = false;
                 return;
             }
 
@@ -1853,10 +1963,17 @@ namespace Oxide.Plugins
                     _lastPastes[pasteData.Player.Id] = new Stack<List<BaseEntity>>();
 
                 _lastPastes[pasteData.Player.Id].Push(pasteData.PastedEntities);
+                foreach (var entity in pasteData.PastedEntities) {
+                    var ioEntity = entity as RFReceiver;
+                    if (ioEntity.IsValid() && !ioEntity.IsDestroyed) {
+                        RFManager.RemoveListener(ioEntity.frequency, ioEntity);
+                    }
+                }
 
                 pasteData.CallbackFinished?.Invoke();
 
                 Interface.CallHook("OnPasteFinished", pasteData.PastedEntities, pasteData.Filename, pasteData.Player, pasteData.StartPos);
+                isPasting = false;
             }
         }
 
@@ -4115,7 +4232,6 @@ namespace Oxide.Plugins
             int newFrequency = frequency;
             if (rfSettings.Cycles.TryGetValue(frequency, out RFCycle rfCycle))
             {
-                var bitValue = rfCycle.HalfPeriod;
                 var position = 1;
                 switch (rfCycle.AxisPriority)
                 {
@@ -4140,8 +4256,7 @@ namespace Oxide.Plugins
                     default:
                         break;
                 }
-                Puts("Position: " + position);
-                newFrequency = position % (bitValue * 2) / bitValue == 0 ? rfCycle.PrimaryFrequency : rfCycle.SecondaryFrequency;
+                newFrequency = position % (rfCycle.HalfPeriod * 2) / rfCycle.HalfPeriod == 0 ? rfCycle.PrimaryFrequency : rfCycle.SecondaryFrequency;
             }
             if (rfSettings.Offsets.TryGetValue(frequency, out RFOffset rfOffset))
                 newFrequency += xCopy * rfOffset.XOffset + yCopy * rfOffset.YOffset + zCopy * rfOffset.ZOffset;
@@ -4156,7 +4271,16 @@ namespace Oxide.Plugins
                 else if (zCopy == 0 && wall.ZMin != 0) newFrequency = wall.ZMin;
                 else if (zCopy == repeatGrid.Grid.Z - 1 && wall.ZMax != 0) newFrequency = wall.ZMax;
             }
-            return newFrequency + rfSettings.Addend;
+            if (rfSettings.Replacements.TryGetValue(frequency, out RFReplacement replacement))
+            {
+                newFrequency = replacement.NewFrequency;
+            }
+            var addendRange = rfSettings.AddendRanges.FirstOrDefault(range => range.Contains(frequency));
+            if (addendRange != null)
+            {
+                newFrequency += addendRange.Addend;
+            }
+            return Mathf.Clamp(newFrequency + rfSettings.Addend, 1, 999999);
         }
 
         private void PreLoadChildrenData(Dictionary<string, object> entity)
@@ -4544,7 +4668,7 @@ namespace Oxide.Plugins
 
             if (data["protocol"] != null)
                 protocol = data["protocol"] as Dictionary<string, object>;
-
+            isPasting = true;
             var pasteData = Paste(preloadData, protocol, ownership, startPos, player, stability, rotationCorrection,
                 autoHeight ? heightAdj : 0, auth, callback, callbackSpawned, filename, checkPlaced, enableSaving,
                 dlc, skinsMode);
@@ -5179,6 +5303,76 @@ namespace Oxide.Plugins
 
                     break;
 
+                case "bar":
+                case "broadcasteraddrange":
+                    if (args.Length < 4 ||
+                        !int.TryParse(args[1], out int startFrequency) ||
+                        !int.TryParse(args[2], out int endFrequency) ||
+                        !int.TryParse(args[3], out addend))
+                    {
+                        player.Reply(Lang("SYNTAX_BROADCASTER_ADDEND_RANGE"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].BroadcasterSettings.AddendRanges.Add(new RFAddendRange(startFrequency, endFrequency, addend));
+
+                    break;
+
+                case "rar":
+                case "receiveraddrange":
+                    if (args.Length < 4 ||
+                        !int.TryParse(args[1], out startFrequency) ||
+                        !int.TryParse(args[2], out endFrequency) ||
+                        !int.TryParse(args[3], out addend))
+                    {
+                        player.Reply(Lang("SYNTAX_RECEIVER_ADDEND_RANGE"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].ReceiverSettings.AddendRanges.Add(new RFAddendRange(startFrequency, endFrequency, addend));
+
+                    break;
+
+                case "br":
+                case "broadcasterreplace":
+                    if (args.Length < 3 ||
+                        !int.TryParse(args[1], out frequency) ||
+                        !int.TryParse(args[2], out int newFrequency))
+                    {
+                        player.Reply(Lang("SYNTAX_BROADCASTER_REPLACE"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].BroadcasterSettings.Replacements[frequency] = new RFReplacement(frequency, newFrequency);
+
+                    break;
+
+                case "rr":
+                case "receiverreplace":
+                    if (args.Length < 3 ||
+                        !int.TryParse(args[1], out frequency) ||
+                        !int.TryParse(args[2], out newFrequency))
+                    {
+                        player.Reply(Lang("SYNTAX_RECEIVER_REPLACE"));
+                        return;
+                    };
+
+                    if (!_repeatGrids.ContainsKey(player.Id))
+                        _repeatGrids[player.Id] = new RepeatGrid();
+
+                    _repeatGrids[player.Id].ReceiverSettings.Replacements[frequency] = new RFReplacement(frequency, newFrequency);
+
+                    break;
+
                 case "c":
                 case "clear":
                     if (_repeatGrids.ContainsKey(player.Id))
@@ -5749,6 +5943,8 @@ namespace Oxide.Plugins
                                   "<color=yellow>/repeat [broadcasterModulo/receiverModulo]</color> - applies modulo on specified frequency, best to pair with other settings\n" +
                                   "<color=yellow>/repeat [broadcasterCycle/receiverCycle]</color> - alternates between 2 frequencies\n" +
                                   "<color=yellow>/repeat [broadcasterAdd/receiverAdd]</color> - adds a number to all frequencies\n" +
+                                  "<color=yellow>/repeat [broadcasterAddRange/receiverAddRange]</color> - adds a number to all frequencies in given range\n" +
+                                  "<color=yellow>/repeat [broadcasterReplace/receiverReplace]</color> - replaces a frequency with a new one\n" +
                                   "<color=yellow>/repeat clear</color> - clears the current settings"
                         },
                         {
@@ -5758,6 +5954,8 @@ namespace Oxide.Plugins
                                   "<color=yellow>/repeat [broadcasterModulo/receiverModulo]</color> - Применяет модуль к заданной частоте; лучше сочетать с другими параметрами\n" +
                                   "<color=yellow>/repeat [broadcasterCycle/receiverCycle]</color> - Чередуется между двумя частотами\n" +
                                   "<color=yellow>/repeat [broadcasterAdd/receiverAdd]</color> - Прибавляет число ко всем частотам\n" +
+                                  "<color=yellow>/repeat [broadcasterAddRange/receiverAddRange]</color> - Добавляет число ко всем частотам в заданном диапазоне\n" +
+                                  "<color=yellow>/repeat [broadcasterReplace/receiverReplace]</color> - Заменяет частоту на новую\n" +
                                   "<color=yellow>/repeat clear</color> - Сбрасывает текущие настройки"
                         },
                         {
@@ -5767,6 +5965,8 @@ namespace Oxide.Plugins
                                   "<color=yellow>/repeat [broadcasterModulo/receiverModulo]</color> - Past modulo toe op de opgegeven frequentie; het beste te combineren met andere instellingen\n" +
                                   "<color=yellow>/repeat [broadcasterCycle/receiverCycle]</color> - Wisselt af tussen twee frequenties\n" +
                                   "<color=yellow>/repeat [broadcasterAdd/receiverAdd]</color> - Voegt een getal toe aan alle frequenties\n" +
+                                  "<color=yellow>/repeat [broadcasterAddRange/receiverAddRange]</color> - Voegt een getal toe aan alle frequenties in het opgegeven bereik\n" +
+                                  "<color=yellow>/repeat [broadcasterReplace/receiverReplace]</color> - Vervangt een frequentie door een nieuwe\n" +
                                   "<color=yellow>/repeat clear</color> - Wis de huidige instellingen"
                         }
                     }
@@ -5799,15 +5999,15 @@ namespace Oxide.Plugins
                     "SYNTAX_BROADCASTER_WALL", new Dictionary<string, string>
                     {
                         {
-                            "en", "Syntax: /repeat broadcasterWall <Original Frequency> <X = 1 Frequency> <X = Max Frequency> <Y = 1 Frequency> <Y = Max Frequency> <Z = 1 Frequency> <Z = Max Frequency>\n" +
+                            "en", "Syntax: /repeat broadcasterWall <Original Frequency> <X=1 Frequency> <X=Max Frequency> <Y=1 Frequency> <Y=Max Frequency> <Z=1 Frequency> <Z=Max Frequency>\n" +
                                   "Set frequency to 0 if you do not want to override that particular side."
                         },
                         {
-                            "ru", "Синтаксис: /repeat broadcasterWall <Исходная частота> <X = 1 частота> <X = макс частота> <Y = 1 частота> <Y = макс частота> <Z = 1 частота> <Z = макс частота>\n" +
+                            "ru", "Синтаксис: /repeat broadcasterWall <Исходная частота> <X=1 частота> <X=макс частота> <Y=1 частота> <Y=макс частота> <Z=1 частота> <Z=макс частота>\n" +
                                   "Установите частоту в 0, если не хотите изменять эту сторону."
                         },
                         {
-                            "nl", "Syntax: /repeat broadcasterWall <Oorspronkelijke frequentie> <X = 1 Frequentie> <X = Max Frequentie> <Y = 1 Frequentie> <Y = Max Frequentie> <Z = 1 Frequentie> <Z = Max Frequentie>\n" +
+                            "nl", "Syntax: /repeat broadcasterWall <Oorspronkelijke frequentie> <X=1 Frequentie> <X=Max Frequentie> <Y=1 Frequentie> <Y=Max Frequentie> <Z=1 Frequentie> <Z=Max Frequentie>\n" +
                                   "Stel de frequentie in op 0 als je die kant niet wilt overschrijven."
                         }
                     }
@@ -5815,9 +6015,9 @@ namespace Oxide.Plugins
                 {
                     "SYNTAX_RECEIVER_WALL", new Dictionary<string, string>
                     {
-                        { "en", "Syntax: /repeat receiverWall <Original Frequency> <X = 1 Frequency> <X = Max Frequency> <Y = 1 Frequency> <Y = Max Frequency> <Z = 1 Frequency> <Z = Max Frequency>" },
-                        { "ru", "Синтаксис: /repeat receiverWall <Исходная частота> <X = 1 частота> <X = макс частота> <Y = 1 частота> <Y = макс частота> <Z = 1 частота> <Z = макс частота>" },
-                        { "nl", "Syntax: /repeat receiverWall <Oorspronkelijke frequentie> <X = 1 Frequentie> <X = Max Frequentie> <Y = 1 Frequentie> <Y = Max Frequentie> <Z = 1 Frequentie> <Z = Max Frequentie>" }
+                        { "en", "Syntax: /repeat receiverWall <Original Frequency> <X=1 Frequency> <X=Max Frequency> <Y=1 Frequency> <Y=Max Frequency> <Z=1 Frequency> <Z=Max Frequency>" },
+                        { "ru", "Синтаксис: /repeat receiverWall <Исходная частота> <X=1 частота> <X=макс частота> <Y=1 частота> <Y=макс частота> <Z=1 частота> <Z=макс частота>" },
+                        { "nl", "Syntax: /repeat receiverWall <Oorspronkelijke frequentie> <X=1 Frequentie> <X=Max Frequentie> <Y=1 Frequentie> <Y=Max Frequentie> <Z=1 Frequentie> <Z=Max Frequentie>" }
                     }
                 },
                 {
@@ -5839,7 +6039,7 @@ namespace Oxide.Plugins
                 {
                     "SYNTAX_BROADCASTER_CYCLE", new Dictionary<string, string>
                     {
-                        { "en", "Syntax: /repeat broadcasterCycle <Original Frequency> <1st frequency> <2nd frequency> <Bit Position> <Orientation - XYZ/XZY...>" },
+                        { "en", "Syntax: /repeat broadcasterCycle <Original Frequency> <1st frequency> <2nd frequency> <Cycle length> <Axis priority - XYZ/XZY...>" },
                         { "ru", "Синтаксис: /repeat broadcasterCycle <Исходная частота> <Частота значения «False»> <Частота значения «True»> <Позиция бита> <Ориентация - XYZ/XZY...>" },
                         { "nl", "Syntax: /repeat broadcasterCycle <Oorspronkelijke frequentie> <Frequentie van False> <Frequentie van True> <Bitpositie> <Oriëntatie - XYZ/XZY...>" }
                     }
@@ -5847,25 +6047,57 @@ namespace Oxide.Plugins
                 {
                     "SYNTAX_RECEIVER_CYCLE", new Dictionary<string, string>
                     {
-                        { "en", "Syntax: /repeat receiverCycle <Original Frequency> <Frequency of value False> <Frequency of value True> <Bit Position> <Orientation - XYZ/XZY...>" },
+                        { "en", "Syntax: /repeat receiverCycle <Original Frequency> <1st frequency> <2nd frequency> <Cycle length> <Axis priority - XYZ/XZY...>" },
                         { "ru", "Синтаксис: /repeat receiverCycle <Исходная частота> <Частота значения «False»> <Частота значения «True»> <Позиция бита> <Ориентация - XYZ/XZY...>" },
                         { "nl", "Syntax: /repeat receiverCycle <Oorspronkelijke frequentie> <Frequentie van False> <Frequentie van True> <Bitpositie> <Oriëntatie - XYZ/XZY...>" }
                     }
                 },
                 {
-                    "SYNTAX_BROADCASTER_ADD", new Dictionary<string, string>
+                    "SYNTAX_BROADCASTER_ADDEND", new Dictionary<string, string>
                     {
                         { "en", "Syntax: /repeat broadcasterAdd <Frequency>" },
-                        { "ru", "Синтаксис: /repeat broadcasterAdd <частота>" },
+                        { "ru", "Синтаксис: /repeat broadcasterAdd <Частота>" },
                         { "nl", "Syntax: /repeat broadcasterAdd <Frequentie>" }
                     }
                 },
                 {
-                    "SYNTAX_RECEIVER_ADD", new Dictionary<string, string>
+                    "SYNTAX_RECEIVER_ADDEND", new Dictionary<string, string>
                     {
                         { "en", "Syntax: /repeat receiverAdd <Frequency>" },
-                        { "ru", "Синтаксис: /repeat receiverAdd <частота>" },
+                        { "ru", "Синтаксис: /repeat receiverAdd <Частота>" },
                         { "nl", "Syntax: /repeat receiverAdd <Frequentie>" }
+                    }
+                },
+                {
+                    "SYNTAX_BROADCASTER_ADDEND_RANGE", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat broadcasterAddRange <Start Frequency> <End Frequency> <Frequency>" },
+                        { "ru", "Синтаксис: /repeat broadcasterAddRange <Начальная частота> <Конечная частота> <Частота>" },
+                        { "nl", "Syntax: /repeat broadcasterAddRange <Startfrequentie> <Eindfrequentie> <Frequentie>" }
+                    }
+                },
+                {
+                    "SYNTAX_RECEIVER_ADDEND_RANGE", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat receiverAddRange <Start Frequency> <End Frequency> <Frequency>" },
+                        { "ru", "Синтаксис: /repeat receiverAddRange <Начальная частота> <Конечная частота> <Частота>" },
+                        { "nl", "Syntax: /repeat receiverAddRange <Startfrequentie> <Eindfrequentie> <Frequentie>" }
+                    }
+                },
+                {
+                    "SYNTAX_BROADCASTER_REPLACE", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat broadcasterReplace <Original Frequency> <New Frequency>" },
+                        { "ru", "Синтаксис: /repeat broadcasterReplace <Исходная частота> <Новая частота>" },
+                        { "nl", "Syntax: /repeat broadcasterReplace <Oorspronkelijke frequentie> <Nieuwe frequentie>" }
+                    }
+                },
+                {
+                    "SYNTAX_RECEIVER_REPLACE", new Dictionary<string, string>
+                    {
+                        { "en", "Syntax: /repeat receiverReplace <Original Frequency> <New Frequency>" },
+                        { "ru", "Синтаксис: /repeat receiverReplace <Исходная частота> <Новая частота>" },
+                        { "nl", "Syntax: /repeat receiverReplace <Oorspronkelijke frequentie> <Nieuwe frequentie>" }
                     }
                 },
                 {
