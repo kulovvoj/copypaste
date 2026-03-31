@@ -1964,11 +1964,11 @@ namespace Oxide.Plugins
 
                 _lastPastes[pasteData.Player.Id].Push(pasteData.PastedEntities);
                 foreach (var entity in pasteData.PastedEntities) {
-                    var ioEntity = entity as RFReceiver;
-                    if (ioEntity.IsValid() && !ioEntity.IsDestroyed) {
-                        RFManager.RemoveListener(ioEntity.frequency, ioEntity);
-                        if (ioEntity.IsOn()) {
-                            RFManager.AddListener(ioEntity.frequency, ioEntity);
+                    var rfReceiver = entity as RFReceiver;
+                    if (rfReceiver.IsValid() && !rfReceiver.IsDestroyed) {
+                        RFManager.RemoveListener(rfReceiver.frequency, rfReceiver);
+                        if (rfReceiver.IsOn()) {
+                            RFManager.AddListener(rfReceiver.frequency, rfReceiver);
                         }
                     }
                 }
