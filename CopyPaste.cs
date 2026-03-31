@@ -1967,6 +1967,9 @@ namespace Oxide.Plugins
                     var ioEntity = entity as RFReceiver;
                     if (ioEntity.IsValid() && !ioEntity.IsDestroyed) {
                         RFManager.RemoveListener(ioEntity.frequency, ioEntity);
+                        if (ioEntity.IsOn()) {
+                            RFManager.AddListener(ioEntity.frequency, ioEntity);
+                        }
                     }
                 }
 
