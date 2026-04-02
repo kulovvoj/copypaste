@@ -1966,7 +1966,14 @@ namespace Oxide.Plugins
                 foreach (var entity in pasteData.PastedEntities) {
                     var rfReceiver = entity as RFReceiver;
                     if (rfReceiver.IsValid() && !rfReceiver.IsDestroyed) {
-                        rfReceiver.UpdateFromInput(rfReceiver.currentEnergy, 0);
+                        for (int i = 0; i < rfReceiver.inputs.Count(); i++) {
+                            if (rfReceiver.inputs[i] != null) {
+                                var currentEnergy = rfReceiver.currentEnergy;
+                                rfReceiver.UpdateFromInput(0, i);
+                                rfReceiver.UpdateFromInput(currentEnergy, i);
+                            }
+                        }
+                        rfReceiver.SendNetworkUpdate();
                     }
                     var ioEntity = entity as IOEntity;
                     if (ioEntity.IsValid() && !ioEntity.IsDestroyed) {
@@ -3375,7 +3382,6 @@ namespace Oxide.Plugins
                 int newFrequency = Convert.ToInt32(ioData["frequency"]);
                 RFManager.RemoveListener(rfReceiver.frequency, rfReceiver);
                 rfReceiver.frequency = newFrequency;
-                rfReceiver.SendNetworkUpdate();
             }
 
             var seismicSensor = ioEntity as SeismicSensor;
