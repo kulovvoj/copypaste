@@ -1988,7 +1988,6 @@ namespace Oxide.Plugins
                                     outputs[i].linePoints[1] = outputPos;
                                 }
                             }
-                            ioEntity.SendNetworkUpdate();
                         }
                     }
                 }
