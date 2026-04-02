@@ -1971,6 +1971,26 @@ namespace Oxide.Plugins
                             RFManager.AddListener(rfReceiver.frequency, rfReceiver);
                         }
                     }
+                    var ioEntity = entity as IOEntity;
+                    if (ioEntity.IsValid() && !ioEntity.IsDestroyed) {
+                        IOEntity.IOSlot[] outputs = ioEntity.outputs;
+                        if (outputs != null) {
+                            for (int i = 0; i < outputs.Count(); i++) {
+                                if (outputs[i].connectedTo.Get() != null && (outputs[i].linePoints.Count() == 0 || outputs[i].linePoints == null)) {
+                                    outputs[i].linePoints = new Vector3[2];
+                                    IOEntity connectedIoEntity = outputs[i].connectedTo.Get();
+                                    Vector3 outputPos = outputs[i].handlePosition;
+
+                                    Vector3 inputPos = ioEntity.transform.InverseTransformPoint(connectedIoEntity.transform.TransformPoint(
+                                        connectedIoEntity.inputs[outputs[i].connectedToSlot].handlePosition
+                                    ));
+                                    outputs[i].linePoints[0] = inputPos;
+                                    outputs[i].linePoints[1] = outputPos;
+                                }
+                            }
+                            ioEntity.SendNetworkUpdate();
+                        }
+                    }
                 }
 
                 pasteData.CallbackFinished?.Invoke();
@@ -3543,7 +3563,7 @@ namespace Oxide.Plugins
                                         Convert.ToSingle( linePoint["z"] ) );
                                 }
                             }
-                            
+
                             if (output.ContainsKey("slackLevels") && output["slackLevels"] is List<object> slackLevels)
                             {
                                 ioOutput.slackLevels = new float[slackLevels.Count];
